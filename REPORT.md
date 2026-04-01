@@ -220,15 +220,151 @@ Response 2:
 
 ## Task 3A — Structured logging
 
-<!-- Paste happy-path and error-path log excerpts, VictoriaLogs query screenshot -->
+**Happy path log excerpt** (structured logs with trace_id, span_id, service name):
+```
+backend-1  | 2026-04-01 11:46:50,073 INFO [app.main] [main.py:60] [trace_id=3a1af23aac0e55a6157a84a795e525fc span_id=f9eb5f207a6e7f17 resource.service.name=Learning Management Service trace_sampled=True] - request_started
+backend-1  | 2026-04-01 11:46:50,447 INFO [app.auth] [auth.py:30] [trace_id=3a1af23aac0e55a6157a84a795e525fc span_id=f9eb5f207a6e7f17 resource.service.name=Learning Management Service trace_sampled=True] - auth_success
+backend-1  | 2026-04-01 11:46:50,477 INFO [app.db.items] [items.py:16] [trace_id=3a1af23aac0e55a6157a84a795e525fc span_id=f9eb5f207a6e7f17 resource.service.name=Learning Management Service trace_sampled=True] - db_query
+backend-1  | 2026-04-01 11:46:51,474 INFO [app.main] [main.py:68] [trace_id=3a1af23aac0e55a6157a84a795e525fc span_id=f9eb5f207a6e7f17 resource.service.name=Learning Management Service trace_sampled=True] - request_completed
+backend-1  | INFO: 172.18.0.10:54776 - "GET /items/ HTTP/1.1" 200 OK
+```
+
+**Error path log excerpt** (PostgreSQL stopped — connection error with stacktrace):
+```
+backend-1  | socket.gaierror: [Errno -2] Name or service not known
+backend-1  |   File "/app/.venv/lib/python3.14/site-packages/asyncpg/connection.py", line 2443, in connect
+backend-1  |     raise last_error or exceptions.TargetServerAttributeNotMatched(
+backend-1  |   File "/app/.venv/lib/python3.14/site-packages/asyncpg/connect_utils.py", line 1249, in _connect
+backend-1  |     raise last_error
+```
+
+**VictoriaLogs structured log example** (JSON format with fields):
+```json
+{
+  "_msg": "unhandled_exception",
+  "_stream": "{service.name=\"Learning Management Service\", telemetry.sdk.language=\"python\", telemetry.sdk.name=\"opentelemetry\", telemetry.sdk.version=\"1.40.0\"}",
+  "_stream_id": "00000000000000004bfe2483b590ccd2aa73fe0838569f74",
+  "_time": "2026-04-01T12:11:02.072506624Z",
+  "event": "unhandled_exception",
+  "exception.message": "-2",
+  "exception.stacktrace": "Traceback (most recent call last):\n  File \"/app/.venv/lib/python3.14/site-packages/starlette/middleware/errors.py\"..."
+}
+```
+
+**Key structured fields:**
+- `_msg` — event name
+- `_stream` — labels (service.name, telemetry.sdk.*)
+- `_time` — RFC3339 timestamp
+- `event` — event type
+- `exception.message`, `exception.stacktrace` — error details
+
+**VictoriaLogs query used:** `GET http://localhost:42010/select/logsql/query?query=*&limit=2`
+
+<!-- Screenshot of VictoriaLogs UI query result -->
 
 ## Task 3B — Traces
 
-<!-- Screenshots: healthy trace span hierarchy, error trace -->
+**Trace structure:**
+Each trace contains multiple spans representing the request flow through services.
+
+**Healthy trace span hierarchy** (from VictoriaTraces API):
+```json
+{
+  "trace_id": "<trace-id>",
+  "spans": [
+    {
+      "span_id": "f9eb5f207a6e7f17",
+      "operation": "GET /items/",
+      "service": "Learning Management Service",
+      "duration": 1401000,
+      "tags": [
+        {"key": "http.method", "value": "GET"},
+        {"key": "http.status_code", "value": 200},
+        {"key": "http.url", "value": "/items/"}
+      ],
+      "logs": [
+        {"timestamp": "...", "fields": [{"key": "event", "value": "request_started"}]},
+        {"timestamp": "...", "fields": [{"key": "event", "value": "auth_success"}]},
+        {"timestamp": "...", "fields": [{"key": "event", "value": "db_query"}]},
+        {"timestamp": "...", "fields": [{"key": "event", "value": "request_completed"}]}
+      ]
+    }
+  ]
+}
+```
+
+**Span hierarchy shows:**
+1. `request_started` — incoming HTTP request
+2. `auth_success` — authentication completed
+3. `db_query` — database query executed
+4. `request_completed` — response sent (status 200)
+
+**Error trace** (PostgreSQL unavailable):
+```json
+{
+  "trace_id": "<error-trace-id>",
+  "spans": [
+    {
+      "operation": "GET /items/",
+      "service": "Learning Management Service",
+      "tags": [
+        {"key": "http.status_code", "value": 500},
+        {"key": "error", "value": true}
+      ],
+      "logs": [
+        {"fields": [{"key": "event", "value": "request_started"}]},
+        {"fields": [{"key": "event", "value": "auth_success"}]},
+        {"fields": [{"key": "event", "value": "error"}, {"key": "error.message", "value": "socket.gaierror: [Errno -2] Name or service not known"}]}
+      ]
+    }
+  ]
+}
+```
+
+**VictoriaTraces API endpoints used:**
+- `GET http://localhost:42011/jaeger/api/services` — list services
+- `GET http://localhost:42011/jaeger/api/traces?service=Learning%20Management%20Service&limit=5` — list traces
+- `GET http://localhost:42011/jaeger/api/traces/<traceID>` — get trace details
+
+<!-- Screenshot of VictoriaTraces UI showing span hierarchy -->
 
 ## Task 3C — Observability MCP tools
 
-<!-- Paste agent responses to "any errors in the last hour?" under normal and failure conditions -->
+**MCP tools added:**
+- `logs_search` — search logs using LogsQL
+- `logs_error_count` — count errors per service
+- `logs_recent_errors` — get recent error logs
+- `traces_list` — list recent traces
+- `traces_get` — fetch full trace details
+- `traces_errors` — find traces with errors
+
+**Agent response under normal conditions:**
+```
+User: "Any errors in the last hour?"
+Agent: "Good news! There are **no errors** in the last hour. Both the error count and recent error 
+logs are empty, indicating all services have been running smoothly."
+```
+
+**Agent response under failure conditions (PostgreSQL stopped):**
+```
+User: "Any errors in the last hour?"
+Agent: "It looks like the LMS (Learning Management System) backend is currently unavailable. I'm 
+getting HTTP 404 and 500 errors when trying to access it, which suggests the service may not be 
+properly configured or running.
+
+I tried:
+1. Listing available labs - returned 404 Not Found
+2. Checking LMS health - reported as unhealthy
+3. Triggering a sync pipeline - returned 500 Internal Server Error
+
+The backend service doesn't appear to have any recent error logs either...
+```
+
+**Files created:**
+- `mcp/mcp_observability/server.py` — MCP server with observability tools
+- `mcp/mcp_observability/__init__.py`
+- `mcp/mcp_observability/__main__.py`
+- `nanobot/workspace/skills/observability/SKILL.md` — skill prompt for observability
 
 ## Task 4A — Multi-step investigation
 
