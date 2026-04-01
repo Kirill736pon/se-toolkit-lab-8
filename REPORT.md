@@ -333,16 +333,21 @@ Each trace contains multiple spans representing the request flow through service
 **MCP tools added:**
 - `logs_search` — search logs using LogsQL
 - `logs_error_count` — count errors per service
-- `logs_recent_errors` — get recent error logs
+- `logs_recent_errors()` — get recent error logs
 - `traces_list` — list recent traces
 - `traces_get` — fetch full trace details
 - `traces_errors` — find traces with errors
 
-**Agent response under normal conditions:**
+**Agent response under normal conditions (no errors):**
 ```
 User: "Any errors in the last hour?"
 Agent: "Good news! There are **no errors** in the last hour. Both the error count and recent error 
 logs are empty, indicating all services have been running smoothly."
+
+User: "Call logs_recent_errors and show me the raw results"
+Agent: "The raw results show an empty array `[]`, which means there are **no recent error logs** 
+from any services in the last hour. The system appears to be running without errors during this 
+time window."
 ```
 
 **Agent response under failure conditions (PostgreSQL stopped):**
@@ -355,16 +360,14 @@ properly configured or running.
 I tried:
 1. Listing available labs - returned 404 Not Found
 2. Checking LMS health - reported as unhealthy
-3. Triggering a sync pipeline - returned 500 Internal Server Error
-
-The backend service doesn't appear to have any recent error logs either...
+3. Triggering a sync pipeline - returned 500 Internal Server Error"
 ```
 
 **Files created:**
-- `mcp/mcp_observability/server.py` — MCP server with observability tools
+- `mcp/mcp_observability/server.py` — MCP server with 6 observability tools
 - `mcp/mcp_observability/__init__.py`
 - `mcp/mcp_observability/__main__.py`
-- `nanobot/workspace/skills/observability/SKILL.md` — skill prompt for observability
+- `nanobot/workspace/skills/observability/SKILL.md` — skill prompt teaching agent to show real data
 
 ## Task 4A — Multi-step investigation
 
