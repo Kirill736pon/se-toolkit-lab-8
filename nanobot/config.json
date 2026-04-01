@@ -34,5 +34,11 @@
         }
       }
     }
+  },
+  "channels": {
+    "webchat": {
+      "enabled": true,
+      "allow_from": ["*"]
+    }
   }
 }

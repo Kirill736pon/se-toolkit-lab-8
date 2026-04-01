@@ -5,9 +5,17 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = "==3.14.2"
 dependencies = [
-    "lms-mcp",
-    "nanobot-ai>=0.1.4.post6",
+    "nanobot-ai",
+    "nanobot-webchat",
 ]
 
 [tool.uv.sources]
-lms-mcp = { workspace = true, editable = true }
+# For local development (paths relative to repo root)
+nanobot-webchat = { path = "../nanobot-websocket-channel/nanobot-webchat", editable = true }
+nanobot-channel-protocol = { path = "../nanobot-websocket-channel/nanobot-channel-protocol", editable = true }
+nanobot-ai = { url = "https://github.com/HKUDS/nanobot/archive/e7d371ec1e6531b28898ec2c869ef338e8dd46ec.zip" }
+
+# For Docker build (overridden in Dockerfile via sed or separate file)
+# [tool.uv.sources.docker]
+# nanobot-webchat = { path = "../webchat/nanobot-webchat", editable = true }
+# nanobot-channel-protocol = { path = "../webchat/nanobot-channel-protocol", editable = true }
