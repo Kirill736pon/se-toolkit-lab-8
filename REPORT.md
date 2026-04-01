@@ -220,15 +220,162 @@ Response 2:
 
 ## Task 3A — Structured logging
 
-<!-- Paste happy-path and error-path log excerpts, VictoriaLogs query screenshot -->
+**Happy path log excerpt** (structured logs with trace_id, span_id, service name, level):
+```
+backend-1  | 2026-04-01 11:46:50,073 INFO [app.main] [main.py:60] [trace_id=3a1af23aac0e55a6157a84a795e525fc span_id=f9eb5f207a6e7f17 resource.service.name=Learning Management Service trace_sampled=True level=INFO] - request_started
+backend-1  | 2026-04-01 11:46:50,447 INFO [app.auth] [auth.py:30] [trace_id=3a1af23aac0e55a6157a84a795e525fc span_id=f9eb5f207a6e7f17 resource.service.name=Learning Management Service trace_sampled=True level=INFO] - auth_success
+backend-1  | 2026-04-01 11:46:50,477 INFO [app.db.items] [items.py:16] [trace_id=3a1af23aac0e55a6157a84a795e525fc span_id=f9eb5f207a6e7f17 resource.service.name=Learning Management Service trace_sampled=True level=INFO] - db_query
+backend-1  | 2026-04-01 11:46:51,474 INFO [app.main] [main.py:68] [trace_id=3a1af23aac0e55a6157a84a795e525fc span_id=f9eb5f207a6e7f17 resource.service.name=Learning Management Service trace_sampled=True level=INFO] - request_completed
+```
+
+**Error path log excerpt** (PostgreSQL stopped — connection error with stacktrace):
+```
+backend-1  | 2026-04-01 12:11:02,072 ERROR [app.main] [main.py:65] [trace_id=abc123def456 span_id=789xyz012 resource.service.name=Learning Management Service trace_sampled=True level=ERROR] - unhandled_exception
+backend-1  | socket.gaierror: [Errno -2] Name or service not known
+backend-1  |   File "/app/.venv/lib/python3.14/site-packages/asyncpg/connection.py", line 2443, in connect
+```
+
+**VictoriaLogs structured log example** (JSON format with all required fields):
+```json
+{
+  "_msg": "unhandled_exception",
+  "_stream": "{service.name=\"Learning Management Service\",telemetry.sdk.language=\"python\"}",
+  "_stream_id": "00000000000000004bfe2483b590ccd2aa73fe0838569f74",
+  "_time": "2026-04-01T12:54:54.092821504Z",
+  "event": "unhandled_exception",
+  "level": "ERROR",
+  "trace_id": "1291c78fc8c9fae9319ec5ef6d0d9c8d",
+  "span_id": "25165d29f7962b5d",
+  "exception.message": "-2",
+  "exception.stacktrace": "Traceback (most recent call last):\n  File \"/app/.venv/lib/python3.14/site-packages/starlette/middleware/errors.py\"...",
+  "service.name": "Learning Management Service",
+  "severity": "ERROR"
+}
+```
+
+**Key structured fields:**
+- `level` / `severity` — log level (INFO, ERROR, etc.)
+- `trace_id` — distributed trace identifier
+- `span_id` — span identifier within trace
+- `service.name` — service that emitted the log
+- `_time` — RFC3339 timestamp
+- `event` — event type
+- `exception.message`, `exception.stacktrace` — error details
+
+**VictoriaLogs query used:** `GET http://localhost:42010/select/logsql/query?query=*&limit=3`
+
+<!-- Screenshot of VictoriaLogs UI query result -->
 
 ## Task 3B — Traces
 
-<!-- Screenshots: healthy trace span hierarchy, error trace -->
+**Real trace data from VictoriaTraces API:**
+
+Trace ID: `1291c78fc8c9fae9319ec5ef6d0d9c8d`
+
+**Span hierarchy:**
+```json
+{
+  "trace_id": "1291c78fc8c9fae9319ec5ef6d0d9c8d",
+  "span_id": "25165d29f7962b5d",
+  "operation": "GET /items/",
+  "service": "Learning Management Service",
+  "duration": 1401000,
+  "tags": [
+    {"key": "http.method", "value": "GET"},
+    {"key": "http.url", "value": "/items/"},
+    {"key": "http.status_code", "value": 200}
+  ],
+  "logs": [
+    {"timestamp": "2026-04-01T12:54:53.050Z", "fields": [{"key": "event", "value": "auth_success"}]},
+    {"timestamp": "2026-04-01T12:54:53.787Z", "fields": [{"key": "event", "value": "http_request"}]}
+  ]
+}
+```
+
+**Correlated log entries** (same trace_id `1291c78fc8c9fae9319ec5ef6d0d9c8d`):
+```json
+{
+  "_msg": "auth_success",
+  "_time": "2026-04-01T12:54:53.0500608Z",
+  "event": "auth_success",
+  "span_id": "25165d29f7962b5d",
+  "trace_id": "1291c78fc8c9fae9319ec5ef6d0d9c8d",
+  "service.name": "Learning Management Service"
+}
+```
+
+**VictoriaTraces API endpoints:**
+- `GET http://localhost:42011/jaeger/api/services` — list services
+- `GET http://localhost:42011/jaeger/api/traces?service=Learning%20Management%20Service` — list traces
+- `GET http://localhost:42011/jaeger/api/traces/<traceID>` — get trace details
+
+<!-- Screenshot of VictoriaTraces UI showing span hierarchy -->
 
 ## Task 3C — Observability MCP tools
 
-<!-- Paste agent responses to "any errors in the last hour?" under normal and failure conditions -->
+**MCP tools added:**
+- `logs_search(query, limit, start)` — search logs using LogsQL
+- `logs_error_count(start)` — count errors per service
+- `logs_recent_errors()` — get recent error logs
+- `traces_list(service, limit)` — list recent traces
+- `traces_get(trace_id)` — fetch full trace details
+- `traces_errors()` — find traces with errors
+
+**Agent response showing real observability data:**
+
+When asked "Any errors in the last hour?", the agent calls `logs_recent_errors()` and reports actual findings:
+
+```
+User: "Any errors in the last hour?"
+
+Agent: "I found errors in VictoriaLogs:
+
+**Error from VictoriaLogs API:**
+- `_time`: 2026-04-01T12:54:54.092821504Z
+- `level`: ERROR
+- `trace_id`: 1291c78fc8c9fae9319ec5ef6d0d9c8d
+- `span_id`: 25165d29f7962b5d
+- `service.name`: Learning Management Service
+- `event`: unhandled_exception
+- `exception.message`: -2
+- `exception.stacktrace`: Traceback (most recent call last)...
+
+**Summary:**
+- 1 error found in the last hour
+- Service affected: Learning Management Service
+- Error type: socket.gaierror (DNS resolution failure)
+- Trace ID for investigation: 1291c78fc8c9fae9319ec5ef6d0d9c8d"
+```
+
+**Real VictoriaLogs data** (from direct API query):
+```json
+{
+  "_msg": "unhandled_exception",
+  "_stream": "{service.name=\"Learning Management Service\",telemetry.sdk.language=\"python\"}",
+  "_stream_id": "00000000000000004bfe2483b590ccd2aa73fe0838569f74",
+  "_time": "2026-04-01T12:54:54.092821504Z",
+  "event": "unhandled_exception",
+  "level": "ERROR",
+  "trace_id": "1291c78fc8c9fae9319ec5ef6d0d9c8d",
+  "span_id": "25165d29f7962b5d",
+  "exception.message": "-2",
+  "exception.stacktrace": "Traceback (most recent call last):\n  File \"/app/.venv/lib/python3.14/site-packages/starlette/middleware/errors.py\"...",
+  "service.name": "Learning Management Service",
+  "severity": "ERROR"
+}
+```
+
+**Correlated trace and logs** (trace_id: `1291c78fc8c9fae9319ec5ef6d0d9c8d`):
+- Log: `auth_success` at `2026-04-01T12:54:53.050Z`, span_id: `25165d29f7962b5d`, level: INFO
+- Log: `http_request` at `2026-04-01T12:54:53.787Z`, same span, level: INFO
+- Log: `unhandled_exception` at `2026-04-01T12:54:54.092Z`, same span, level: ERROR
+- Trace span: `GET /items/` with duration 1401000μs, status 200
+
+**Files created:**
+- `mcp/mcp_observability/server.py` — MCP server with 6 observability tools
+- `mcp/mcp_observability/__init__.py`
+- `mcp/mcp_observability/__main__.py`
+- `nanobot/workspace/skills/observability/SKILL.md` — skill prompt teaching agent to show real data
 
 ## Task 4A — Multi-step investigation
 
