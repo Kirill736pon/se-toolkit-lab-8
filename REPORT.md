@@ -264,66 +264,45 @@ backend-1  |     raise last_error
 
 ## Task 3B — Traces
 
-**Trace structure:**
-Each trace contains multiple spans representing the request flow through services.
+**Real trace data from VictoriaTraces API:**
 
-**Healthy trace span hierarchy** (from VictoriaTraces API):
+Trace ID: `1291c78fc8c9fae9319ec5ef6d0d9c8d`
+
+**Span hierarchy:**
 ```json
 {
-  "trace_id": "<trace-id>",
-  "spans": [
-    {
-      "span_id": "f9eb5f207a6e7f17",
-      "operation": "GET /items/",
-      "service": "Learning Management Service",
-      "duration": 1401000,
-      "tags": [
-        {"key": "http.method", "value": "GET"},
-        {"key": "http.status_code", "value": 200},
-        {"key": "http.url", "value": "/items/"}
-      ],
-      "logs": [
-        {"timestamp": "...", "fields": [{"key": "event", "value": "request_started"}]},
-        {"timestamp": "...", "fields": [{"key": "event", "value": "auth_success"}]},
-        {"timestamp": "...", "fields": [{"key": "event", "value": "db_query"}]},
-        {"timestamp": "...", "fields": [{"key": "event", "value": "request_completed"}]}
-      ]
-    }
+  "trace_id": "1291c78fc8c9fae9319ec5ef6d0d9c8d",
+  "span_id": "25165d29f7962b5d",
+  "operation": "GET /items/",
+  "service": "Learning Management Service",
+  "duration": 1401000,
+  "tags": [
+    {"key": "http.method", "value": "GET"},
+    {"key": "http.url", "value": "/items/"},
+    {"key": "http.status_code", "value": 200}
+  ],
+  "logs": [
+    {"timestamp": "2026-04-01T12:54:53.050Z", "fields": [{"key": "event", "value": "auth_success"}]},
+    {"timestamp": "2026-04-01T12:54:53.787Z", "fields": [{"key": "event", "value": "http_request"}]}
   ]
 }
 ```
 
-**Span hierarchy shows:**
-1. `request_started` — incoming HTTP request
-2. `auth_success` — authentication completed
-3. `db_query` — database query executed
-4. `request_completed` — response sent (status 200)
-
-**Error trace** (PostgreSQL unavailable):
+**Correlated log entries** (same trace_id `1291c78fc8c9fae9319ec5ef6d0d9c8d`):
 ```json
 {
-  "trace_id": "<error-trace-id>",
-  "spans": [
-    {
-      "operation": "GET /items/",
-      "service": "Learning Management Service",
-      "tags": [
-        {"key": "http.status_code", "value": 500},
-        {"key": "error", "value": true}
-      ],
-      "logs": [
-        {"fields": [{"key": "event", "value": "request_started"}]},
-        {"fields": [{"key": "event", "value": "auth_success"}]},
-        {"fields": [{"key": "event", "value": "error"}, {"key": "error.message", "value": "socket.gaierror: [Errno -2] Name or service not known"}]}
-      ]
-    }
-  ]
+  "_msg": "auth_success",
+  "_time": "2026-04-01T12:54:53.0500608Z",
+  "event": "auth_success",
+  "span_id": "25165d29f7962b5d",
+  "trace_id": "1291c78fc8c9fae9319ec5ef6d0d9c8d",
+  "service.name": "Learning Management Service"
 }
 ```
 
-**VictoriaTraces API endpoints used:**
+**VictoriaTraces API endpoints:**
 - `GET http://localhost:42011/jaeger/api/services` — list services
-- `GET http://localhost:42011/jaeger/api/traces?service=Learning%20Management%20Service&limit=5` — list traces
+- `GET http://localhost:42011/jaeger/api/traces?service=Learning%20Management%20Service` — list traces
 - `GET http://localhost:42011/jaeger/api/traces/<traceID>` — get trace details
 
 <!-- Screenshot of VictoriaTraces UI showing span hierarchy -->
@@ -331,37 +310,41 @@ Each trace contains multiple spans representing the request flow through service
 ## Task 3C — Observability MCP tools
 
 **MCP tools added:**
-- `logs_search` — search logs using LogsQL
-- `logs_error_count` — count errors per service
+- `logs_search(query, limit, start)` — search logs using LogsQL
+- `logs_error_count(start)` — count errors per service
 - `logs_recent_errors()` — get recent error logs
-- `traces_list` — list recent traces
-- `traces_get` — fetch full trace details
-- `traces_errors` — find traces with errors
+- `traces_list(service, limit)` — list recent traces
+- `traces_get(trace_id)` — fetch full trace details
+- `traces_errors()` — find traces with errors
 
 **Agent response under normal conditions (no errors):**
 ```
 User: "Any errors in the last hour?"
 Agent: "Good news! There are **no errors** in the last hour. Both the error count and recent error 
-logs are empty, indicating all services have been running smoothly."
+logs are empty (`[]`), indicating all services have been running smoothly."
 
 User: "Call logs_recent_errors and show me the raw results"
 Agent: "The raw results show an empty array `[]`, which means there are **no recent error logs** 
-from any services in the last hour. The system appears to be running without errors during this 
-time window."
+from any services in the last hour."
 ```
 
-**Agent response under failure conditions (PostgreSQL stopped):**
+**Real VictoriaLogs data** (from direct API query):
+```json
+{
+  "_msg": "unhandled_exception",
+  "_stream": "{service.name=\"Learning Management Service\",telemetry.sdk.language=\"python\"}",
+  "_stream_id": "00000000000000004bfe2483b590ccd2aa73fe0838569f74",
+  "_time": "2026-04-01T12:54:54.092821504Z",
+  "event": "unhandled_exception",
+  "exception.message": "-2",
+  "exception.stacktrace": "Traceback (most recent call last):\n  File \"/app/.venv/lib/python3.14/site-packages/starlette/middleware/errors.py\"..."
+}
 ```
-User: "Any errors in the last hour?"
-Agent: "It looks like the LMS (Learning Management System) backend is currently unavailable. I'm 
-getting HTTP 404 and 500 errors when trying to access it, which suggests the service may not be 
-properly configured or running.
 
-I tried:
-1. Listing available labs - returned 404 Not Found
-2. Checking LMS health - reported as unhealthy
-3. Triggering a sync pipeline - returned 500 Internal Server Error"
-```
+**Correlated trace and logs** (trace_id: `1291c78fc8c9fae9319ec5ef6d0d9c8d`):
+- Log: `auth_success` at `2026-04-01T12:54:53.050Z`, span_id: `25165d29f7962b5d`
+- Log: `http_request` at `2026-04-01T12:54:53.787Z`, same span
+- Trace span: `GET /items/` with duration 1401000μs, status 200
 
 **Files created:**
 - `mcp/mcp_observability/server.py` — MCP server with 6 observability tools
